@@ -3,8 +3,7 @@
 # Converts a folder of FLAC files to ALAC files with ffmpeg
 
 NQDIR="/tmp/flac-to-alac"
-LOG_FILE="/Users/mshick/Library/Logs/flac-to-alac/info.log"
-LIMIT=100
+LOG_FILE="$HOME/Library/Logs/flac-to-alac/info.log"
 
 log() {
     echo "[$(date "+%Y.%m.%d %H:%M:%S")] $1" >> $LOG_FILE 2>&1
@@ -14,7 +13,7 @@ usage() {
     echo "Usage: ./flac-to-alac -i infolder -o outfolder"
 }
 
-while getopts i:o: flag; do
+while getopts hi:o: flag; do
     case "${flag}" in
         i) input="${OPTARG}" ;;
         o) output="${OPTARG}" ;;
@@ -29,39 +28,47 @@ if [ -z ${input+x} ] || [ -z ${output+x} ]; then
 fi
 
 convert() {
+    mkdir -p "$(dirname "$DEST_FILE")"
+
+    if [ -s "$DEST_FILE" ]; then
+        echo "Skipping existing file: $DEST_FILE"
+        return 0
+    fi
+
+    if [ -e "$DEST_FILE" ]; then
+        rm -f "$DEST_FILE"
+    fi
+
     ffmpeg \
 	-nostdin \
-	-i "$INPUT/$FILENAME.flac" \
+    -y \
+    -i "$SOURCE_FILE" \
 	-c:v copy \
 	-c:a alac \
 	-movflags +faststart \
-	"$NQDIR/$FILENAME.m4a" \
-	&& sleep 5 \
-	&& mv "$NQDIR/$FILENAME.m4a" "$OUTPUT" \
-	&& sleep 5
+    "$DEST_FILE"
 }
 
 typeset -fx convert
 
 queue() {
     log "Converting $1"
-    
-    filename=$(basename "$1")
-    filename="${filename%.*}"
-    INPUT=$input OUTPUT=$output FILENAME=$filename NQDIR=$NQDIR nq -q sh -c 'convert'
-    # INPUT=$input OUTPUT=$output FILENAME=$filename NQDIR=$NQDIR nq -q sh -c 'ffmpeg -nostdin -i "$INPUT/$FILENAME.flac" -c:v copy -c:a alac -movflags +faststart "$NQDIR/$FILENAME.m4a" && sleep 5 && mv "$NQDIR/$FILENAME.m4a" "$OUTPUT" && sleep 5'
+
+    rel_path="${1#"$input"/}"
+    if [ "$rel_path" = "$1" ]; then
+        rel_path=$(basename "$1")
+    fi
+
+    dest_file="$output/${rel_path%.flac}.m4a"
+    SOURCE_FILE="$1" DEST_FILE="$dest_file" NQDIR=$NQDIR nq -q bash -c 'convert'
 }
+
+mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$NQDIR"
 
 log "Checking path: $input"
 
-mkdir -p $NQDIR
-
-count=0
-
 find "$input" -name '*.flac' -print0 | 
 while IFS= read -r -d '' line; do
-    if [ "$count" -lt "$LIMIT" ]; then
-        queue "$line"
-        count=$((count + 1))
-    fi
+    queue "$line"
 done
